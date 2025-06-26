@@ -165,3 +165,115 @@ type QueueSpec struct {
 - Guarantee：资源类型的配额下限。即使队列中没有作业，这部分资源也会被保留，不会借给其他队列。 
 - Deserved：资源类型应得的配额。这部分资源允许共享给其他队列，并且可以回收。
 
+
+以下是根据 Volcano Capacity 插件源代码的工作流程绘制的详细流程图，展示了该插件的核心工作机制：
+
+![工作原理](images/deepseek_mermaid_20250626_b5a8df.png)
+
+### 流程详解：
+
+#### 1. **初始化阶段**
+```go
+func OnSessionOpen(ssn *framework.Session) {
+    cp.totalResource.Add(ssn.TotalResource) // 初始化集群总资源
+    hierarchyEnabled := cp.HierarchyEnabled(ssn) // 检查是否启用层次结构
+    if hierarchyEnabled {
+        readyToSchedule = cp.buildHierarchicalQueueAttrs(ssn) // 构建层次队列
+    } else {
+        cp.buildQueueAttrs(ssn) // 构建平级队列
+    }
+    // ...注册功能函数...
+}
+```
+
+#### 2. **核心功能注册**
+插件注册五个核心功能函数：
+
+| 功能函数 | 作用 | 关键逻辑 |
+|---------|------|---------|
+| **ReclaimableFn** | 资源回收 | 选择超过保障资源的任务进行回收 |
+| **PreemptiveFn** | 抢占控制 | 检查抢占后是否超过应得资源 |
+| **AllocatableFn** | 任务分配 | 层次化校验队列资源容量 |
+| **JobEnqueueableFn** | 作业入队 | 检查作业是否可加入队列 |
+| **EventHandler** | 资源追踪 | 更新资源分配/释放状态 |
+
+#### 3. **层次化处理流程**
+```go
+func checkHierarchicalQueue(attr *queueAttr) error {
+    // 1. 检查父队列能力≥子队列总和
+    if parentCapability < childTotal {
+        return error("父队列能力不足")
+    }
+    
+    // 2. 检查保障资源一致性
+    if parentGuarantee < childGuarantees {
+        return error("父队列保障资源不足")
+    }
+    
+    // 3. 递归检查子队列
+    for _, child := range children {
+        checkHierarchicalQueue(child)
+    }
+}
+```
+
+#### 4. **资源校验逻辑**
+**任务分配校验：**
+```go
+func queueAllocatable(queue *api.QueueInfo, candidate *api.TaskInfo) bool {
+    futureUsed := allocated + candidate资源
+    return futureUsed ≤ realCapability // 不超过队列能力
+}
+```
+
+**作业入队校验：**
+```go
+func jobEnqueueable(queue *api.QueueInfo, job *api.JobInfo) bool {
+    required := minReq + allocated + inqueue - elastic
+    return required ≤ realCapability // 不超过队列能力
+}
+```
+
+#### 5. **资源监控指标**
+插件实时更新Prometheus指标：
+```go
+metrics.UpdateQueueDeserved(...)    // 队列应得资源
+metrics.UpdateQueueAllocated(...)   // 已分配资源
+metrics.UpdateQueueRequest(...)     // 总请求资源
+metrics.UpdateQueueShare(...)       // 资源使用率
+```
+
+#### 6. **事件驱动更新**
+```go
+AddEventHandler(&framework.EventHandler{
+    AllocateFunc: func(event *framework.Event) {
+        attr.allocated.Add(event.Task.Resreq) // 分配资源
+        cp.updateShare(attr) // 更新份额
+    },
+    DeallocateFunc: func(event *framework.Event) {
+        attr.allocated.Sub(event.Task.Resreq) // 释放资源
+        cp.updateShare(attr) // 更新份额
+    }
+})
+```
+
+### 关键设计特点：
+1. **双模式支持**：
+  - 平级队列：所有队列独立管理
+  - 层次队列：父子队列嵌套管理
+
+2. **多层校验**：
+![流程图](images/deepseek_mermaid_20250626_3e89fe.png)
+
+3. **动态资源计算**：
+   ```
+   deserved = min(capability, max(guarantee, request))
+   ```
+
+4. **资源状态跟踪**：
+  - 已分配(allocated)
+  - 总请求(request)
+  - 排队中(inqueue)
+  - 可回收(elastic)
+
+这个流程图完整展示了Capacity插件如何作为Volcano调度器的资源管家，实现从资源初始化、队列构建、功能注册到实时监控的全流程管理。
