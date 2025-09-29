@@ -94,3 +94,53 @@ Cooldown Protection插件典型参数：
 - Cooldown Protection是宏观层面的调度节流，关注"调度决策的频率"
 
 它们共同构成了Volcano调度器的"质量控制"体系，一个确保调度决策的正确性，一个确保调度决策的合理性。
+
+
+
+https://dl-cdn.alpinelinux.org/v3.22/main/x86_64/openssl-3.5.3-r1.apk
+https://dl-cdn.alpinelinux.org/v3.22/main/x86_64/libssl3-3.5.3-r1.apk
+https://dl-cdn.alpinelinux.org/v3.22/main/x86_64/libcrypto3-3.5.3-r1.apk
+https://dl-cdn.alpinelinux.org/v3.22/main/x86_64/ca-certificates-20250619-r0.apk
+https://cdn.dl.k8s.io/release/v1.34.0/bin/linux/amd64/kubectl
+FROM alpine:latest
+
+COPY ./installer/dockerfile/webhook-manager/ca-certificates-20250619-r0.apk /ca-certificates.apk
+COPY ./installer/dockerfile/webhook-manager/libcrypto3-3.5.3-r1.apk /libcrypto3.apk
+COPY ./installer/dockerfile/webhook-manager/libssl3-3.5.3-r1.apk /libssl3.apk
+
+RUN apk add --no-cache --allow-untrusted \
+    /libcrypto3.apk \
+    /libssl3.apk \
+    /ca-certificates.apk
+
+COPY ./installer/dockerfile/webhook-manager/kubectl /usr/local/bin/kubectl
+COPY ./installer/dockerfile/webhook-manager/openssl /usr/bin/openssl
+
+
+RUN chmod +x /usr/local/bin/kubectl && \
+    chmod +x /usr/bin/openssl
+
+COPY ./_output/bin/vc-webhook-manager /vc-webhook-manager
+ADD ./installer/dockerfile/webhook-manager/gen-admission-secret.sh /gen-admission-secret.sh
+ENTRYPOINT ["/vc-webhook-manager"]
+FROM alpine:latest
+
+COPY ./installer/dockerfile/webhook-manager/ca-certificates-20250619-r0.apk /ca-certificates.apk
+COPY ./installer/dockerfile/webhook-manager/libcrypto3-3.5.3-r1.apk /libcrypto3.apk
+COPY ./installer/dockerfile/webhook-manager/libssl3-3.5.3-r1.apk /libssl3.apk
+
+RUN apk add --no-cache --allow-untrusted \
+    /libcrypto3.apk \
+    /libssl3.apk \
+    /ca-certificates.apk
+
+COPY ./installer/dockerfile/webhook-manager/kubectl /usr/local/bin/kubectl
+COPY ./installer/dockerfile/webhook-manager/openssl /usr/bin/openssl
+
+
+RUN chmod +x /usr/local/bin/kubectl && \
+    chmod +x /usr/bin/openssl
+
+COPY ./_output/bin/vc-webhook-manager /vc-webhook-manager
+ADD ./installer/dockerfile/webhook-manager/gen-admission-secret.sh /gen-admission-secret.sh
+ENTRYPOINT ["/vc-webhook-manager"]
